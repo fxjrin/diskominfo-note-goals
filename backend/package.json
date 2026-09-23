@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/database/migrate.ts",
-    "db:seed": "tsx src/database/seed.ts"
+    "db:seed": "tsx src/database/seed.ts",
+    "postbuild": "node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({ type: 'module' }))\""
   },
   "keywords": [],
   "author": "",
