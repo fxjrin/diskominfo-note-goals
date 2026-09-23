@@ -1,5 +1,6 @@
 import type { PoolConnection } from "mysql2/promise";
-import { NotFoundError } from "../errors/HttpError.js";
+import { HttpError, NotFoundError } from "../errors/HttpError.js";
+import type { Goal } from "../models/Goal.js";
 import type { CreateTaskInput, Task, TaskStatus, UpdateTaskInput } from "../models/Task.js";
 import { TaskRepository } from "../repositories/TaskRepository.js";
 import { GoalService } from "./GoalService.js";
@@ -29,9 +30,20 @@ export class TaskService {
     return task;
   }
 
+  private assertInPeriod(goal: Goal, periodId: number, dueDate: string): void {
+    const period = goal.period(periodId);
+    if (!period) {
+      throw new HttpError(422, "Periode tidak ada di goal ini");
+    }
+    if (dueDate < period.startDate || dueDate > period.endDate) {
+      throw new HttpError(422, `Tanggal harus di antara ${period.startDate} dan ${period.endDate} (periode "${period.name}")`);
+    }
+  }
+
   create(userId: number, goalId: number, input: CreateTaskInput): Promise<TaskMutationResult> {
     return this.goals.transaction(async (conn) => {
-      await this.goals.getOwned(userId, goalId, conn, true);
+      const goal = await this.goals.getOwned(userId, goalId, conn, true);
+      this.assertInPeriod(goal, input.periodId, input.dueDate);
       const id = await this.tasks.create(goalId, input, conn);
       const progress = await this.goals.recalculateProgress(goalId, conn);
       const task = await this.tasks.findById(id, conn);
@@ -42,7 +54,10 @@ export class TaskService {
   update(userId: number, id: number, input: UpdateTaskInput): Promise<TaskMutationResult> {
     return this.goals.transaction(async (conn) => {
       const existing = await this.getOwned(userId, id, conn);
-      await this.goals.getOwned(userId, existing.goalId, conn, true);
+      const goal = await this.goals.getOwned(userId, existing.goalId, conn, true);
+      if (input.periodId !== undefined || input.dueDate !== undefined) {
+        this.assertInPeriod(goal, input.periodId ?? existing.periodId, input.dueDate ?? existing.dueDate);
+      }
       await this.tasks.update(id, input, conn);
       const progress = await this.goals.recalculateProgress(existing.goalId, conn);
       const task = await this.tasks.findById(id, conn);

@@ -4,7 +4,8 @@ import { Task, type CreateTaskInput, type TaskRow, type UpdateTaskInput } from "
 import { BaseRepository } from "./BaseRepository.js";
 
 // user_id is joined in so ownership can be checked without a second query
-const SELECT = `SELECT t.id, t.goal_id, g.user_id, t.title, t.month, t.status, t.completed_at, t.created_at, t.updated_at
+const SELECT = `SELECT t.id, t.goal_id, t.period_id, g.user_id, t.title, t.due_date, t.status, t.completed_at,
+  t.created_at, t.updated_at
   FROM tasks t JOIN goals g ON g.id = t.goal_id`;
 
 export class TaskRepository extends BaseRepository {
@@ -14,7 +15,7 @@ export class TaskRepository extends BaseRepository {
 
   async findByGoal(goalId: number, conn?: PoolConnection): Promise<Task[]> {
     const rows = await this.rows<TaskRow>(
-      `${SELECT} WHERE t.goal_id = ? ORDER BY t.month ASC, t.created_at ASC`,
+      `${SELECT} WHERE t.goal_id = ? ORDER BY t.due_date ASC, t.created_at ASC`,
       [goalId],
       conn,
     );
@@ -28,8 +29,8 @@ export class TaskRepository extends BaseRepository {
 
   async create(goalId: number, input: CreateTaskInput, conn: PoolConnection): Promise<number> {
     const result = await this.run(
-      "INSERT INTO tasks (goal_id, title, month) VALUES (?, ?, ?)",
-      [goalId, input.title, input.month],
+      "INSERT INTO tasks (goal_id, period_id, title, due_date) VALUES (?, ?, ?, ?)",
+      [goalId, input.periodId, input.title, input.dueDate],
       conn,
     );
     return result.insertId;
@@ -42,9 +43,13 @@ export class TaskRepository extends BaseRepository {
       sets.push("title = ?");
       params.push(input.title);
     }
-    if (input.month !== undefined) {
-      sets.push("month = ?");
-      params.push(input.month);
+    if (input.periodId !== undefined) {
+      sets.push("period_id = ?");
+      params.push(input.periodId);
+    }
+    if (input.dueDate !== undefined) {
+      sets.push("due_date = ?");
+      params.push(input.dueDate);
     }
     if (input.status !== undefined) {
       sets.push("status = ?", "completed_at = ?");

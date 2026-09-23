@@ -5,9 +5,10 @@ export type TaskStatus = "pending" | "done";
 export interface TaskRow extends RowDataPacket {
   id: number;
   goal_id: number;
+  period_id: number;
   user_id: number;
   title: string;
-  month: number;
+  due_date: string;
   status: TaskStatus;
   completed_at: Date | null;
   created_at: Date;
@@ -18,9 +19,10 @@ export class Task {
   constructor(
     readonly id: number,
     readonly goalId: number,
+    readonly periodId: number,
     readonly userId: number,
     readonly title: string,
-    readonly month: number,
+    readonly dueDate: string,
     readonly status: TaskStatus,
     readonly completedAt: Date | null,
     readonly createdAt: Date,
@@ -31,9 +33,10 @@ export class Task {
     return new Task(
       row.id,
       row.goal_id,
+      row.period_id,
       row.user_id,
       row.title,
-      row.month,
+      row.due_date,
       row.status,
       row.completed_at,
       row.created_at,
@@ -45,17 +48,13 @@ export class Task {
     return this.status === "done";
   }
 
-  get quarter(): number {
-    return Math.ceil(this.month / 3);
-  }
-
   toJSON() {
     return {
       id: this.id,
       goalId: this.goalId,
+      periodId: this.periodId,
       title: this.title,
-      month: this.month,
-      quarter: this.quarter,
+      dueDate: this.dueDate,
       status: this.status,
       completedAt: this.completedAt,
       createdAt: this.createdAt,
@@ -66,11 +65,13 @@ export class Task {
 
 export interface CreateTaskInput {
   title: string;
-  month: number;
+  periodId: number;
+  dueDate: string;
 }
 
 export interface UpdateTaskInput {
   title?: string;
-  month?: number;
+  periodId?: number;
+  dueDate?: string;
   status?: TaskStatus;
 }

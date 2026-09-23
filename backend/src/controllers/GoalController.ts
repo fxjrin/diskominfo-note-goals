@@ -8,7 +8,7 @@ export class GoalController {
   list = async (_req: Request, res: Response): Promise<void> => {
     const { year } = res.locals.query as { year?: number };
     const goals = await this.service.list(currentUser(res).id, year);
-    res.json({ data: goals });
+    res.json({ data: goals.map((goal) => ({ ...goal.toJSON(), summary: goal.summary })) });
   };
 
   detail = async (_req: Request, res: Response): Promise<void> => {
@@ -19,7 +19,7 @@ export class GoalController {
         ...detail.goal.toJSON(),
         tasks: detail.tasks,
         summary: detail.summary,
-        quarters: detail.quarters,
+        periods: detail.periods,
       },
     });
   };

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { AuthController } from "../controllers/AuthController.js";
+import { ExportController } from "../controllers/ExportController.js";
 import { GoalController } from "../controllers/GoalController.js";
 import { TaskController } from "../controllers/TaskController.js";
 import { Database } from "../database/Database.js";
@@ -22,6 +23,7 @@ export function createRouter(): Router {
   const auth = new AuthController();
   const goals = new GoalController();
   const tasks = new TaskController();
+  const exports = new ExportController();
 
   router.get(
     "/health",
@@ -37,6 +39,9 @@ export function createRouter(): Router {
   protectedRoutes.use(requireAuth());
 
   protectedRoutes.get("/auth/me", asyncHandler(auth.me));
+
+  protectedRoutes.get("/export/goals", validate("query", listGoalsQuery), asyncHandler(exports.year));
+  protectedRoutes.get("/export/goals/:id", validate("params", idParam), asyncHandler(exports.goal));
 
   protectedRoutes.get("/goals", validate("query", listGoalsQuery), asyncHandler(goals.list));
   protectedRoutes.post("/goals", validate("body", createGoalBody), asyncHandler(goals.create));

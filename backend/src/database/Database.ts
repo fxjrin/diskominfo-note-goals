@@ -19,6 +19,7 @@ export class Database {
       waitForConnections: true,
       connectionLimit: 10,
       decimalNumbers: true,
+      dateStrings: ["DATE"], // due dates and period bounds stay "YYYY-MM-DD" with no timezone shift
       namedPlaceholders: false,
     });
   }

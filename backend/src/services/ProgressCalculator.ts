@@ -1,45 +1,48 @@
-import type { Task } from "../models/Task.js";
+import type { Period } from "../models/Goal.js";
 
-export interface QuarterSummary {
-  quarter: number;
-  label: string;
-  months: number[];
-  weight: number;
+export interface PeriodCount {
+  periodId: number;
+  total: number;
+  done: number;
+}
+
+export interface PeriodSummary extends Period {
   total: number;
   done: number;
   progress: number;
   contribution: number;
 }
 
-export class ProgressCalculator {
-  static readonly QUARTERS = 4;
-  static readonly QUARTER_WEIGHT = 100 / ProgressCalculator.QUARTERS;
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
+export class ProgressCalculator {
   static percentage(done: number, total: number): number {
     if (total <= 0) {
       return 0;
     }
-    const raw = (done / total) * 100;
-    return Math.min(100, Math.max(0, Math.round(raw * 100) / 100));
+    return Math.min(100, Math.max(0, round2((done / total) * 100)));
   }
 
-  static quarters(tasks: Task[]): QuarterSummary[] {
-    return Array.from({ length: ProgressCalculator.QUARTERS }, (_, index) => {
-      const quarter = index + 1;
-      const months = [quarter * 3 - 2, quarter * 3 - 1, quarter * 3];
-      const scoped = tasks.filter((task) => task.quarter === quarter);
-      const done = scoped.filter((task) => task.isDone).length;
-      const progress = ProgressCalculator.percentage(done, scoped.length);
+  // Each period contributes weight x (done / total); a period without tasks
+  // contributes nothing, so an empty period holds the goal below its weight.
+  static periods(periods: Period[], counts: PeriodCount[]): PeriodSummary[] {
+    return periods.map((period) => {
+      const count = counts.find((c) => c.periodId === period.id) ?? { periodId: period.id, total: 0, done: 0 };
+      const progress = ProgressCalculator.percentage(count.done, count.total);
       return {
-        quarter,
-        label: `Q${quarter}`,
-        months,
-        weight: ProgressCalculator.QUARTER_WEIGHT,
-        total: scoped.length,
-        done,
+        ...period,
+        total: count.total,
+        done: count.done,
         progress,
-        contribution: Math.round((progress / ProgressCalculator.QUARTERS) * 100) / 100,
+        contribution: round2((period.weight * progress) / 100),
       };
     });
+  }
+
+  static overall(periods: Period[], counts: PeriodCount[]): number {
+    const total = ProgressCalculator.periods(periods, counts).reduce((sum, p) => sum + p.contribution, 0);
+    return Math.min(100, Math.max(0, round2(total)));
   }
 }

@@ -46,7 +46,13 @@ export class ApiClient {
     if (response.status === 204) {
       return { data: undefined as T };
     }
-    const body = (await response.json()) as Envelope<T>;
+    let body: Envelope<T>;
+    try {
+      body = (await response.json()) as Envelope<T>;
+    } catch {
+      // Vite answers 502 with an empty body when the backend on port 4000 is not running
+      throw new ApiError(response.status, "Backend tidak berjalan. Jalankan `npm run dev` di folder backend.");
+    }
     if (!response.ok) {
       if (response.status === 401 && !path.startsWith("/auth/login")) {
         this.onUnauthorized();
@@ -84,6 +90,29 @@ export class ApiClient {
 
   async deleteGoal(id: number): Promise<void> {
     await this.request<void>(`/goals/${id}`, { method: "DELETE" });
+  }
+
+  // Bearer auth means a plain link cannot download, so the CSV is fetched and handed to the browser as a file
+  async downloadCsv(path: string, fallbackName: string): Promise<void> {
+    const token = this.getToken();
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as Envelope<unknown>;
+      if (response.status === 401) this.onUnauthorized();
+      throw new ApiError(response.status, body.error ?? "Gagal mengunduh CSV");
+    }
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); // revoking synchronously can cancel the save in Chromium
   }
 
   async createTask(goalId: number, input: TaskInput): Promise<Task> {

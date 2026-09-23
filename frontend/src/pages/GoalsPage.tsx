@@ -1,21 +1,12 @@
-import { CheckCircle2, Plus, Target, TrendingUp } from "lucide-react";
+import { CheckCircle2, ChevronRight, Download, Plus, Target, TrendingUp } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { PeriodEditor } from "@/components/PeriodEditor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -30,7 +21,8 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import type { Goal } from "@/types";
+import { presetPeriods } from "@/lib/dates";
+import { goalStatus, periodError, periodsLabel, type Goal, type PeriodInput } from "@/types";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => String(CURRENT_YEAR - 1 + i));
@@ -41,7 +33,6 @@ export function GoalsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<Goal | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,46 +52,36 @@ export function GoalsPage() {
     };
   }, [year, refreshKey]);
 
-  function refresh() {
-    setRefreshKey((key) => key + 1);
-  }
-
   function changeYear(next: string | null) {
     if (!next) return;
     setYear(next);
     setLoading(true);
   }
 
-  async function handleDelete() {
-    if (!pendingDelete) return;
+  async function exportCsv() {
     try {
-      await api.deleteGoal(pendingDelete.id);
-      toast.success(`Goal "${pendingDelete.title}" dihapus`);
-      refresh();
+      await api.downloadCsv(`/export/goals?year=${year}`, `goals-${year}.csv`);
+      toast.success("File CSV diunduh");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Gagal menghapus goal");
-    } finally {
-      setPendingDelete(null);
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh CSV");
     }
   }
 
   const avgProgress = goals.length
     ? Math.round((goals.reduce((sum, goal) => sum + goal.progress, 0) / goals.length) * 100) / 100
     : 0;
-  const completed = goals.filter((goal) => goal.progress >= 100).length;
+  const achieved = goals.filter((goal) => goalStatus(goal.progress, goal.summary.total).tone === "done").length;
 
   return (
     <div className="grid gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Goals {year}</h1>
-          <p className="text-sm text-muted-foreground">
-            Setiap goal dipecah per kuartal dan per bulan. Progres dihitung otomatis dari task yang selesai.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Goals tahun {year}</h1>
+          <p className="text-sm text-muted-foreground">Pilih goal untuk melihat dan mencentang task-nya.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={year} onValueChange={changeYear} items={YEARS.map((y) => ({ value: y, label: y }))}>
-            <SelectTrigger className="w-28">
+            <SelectTrigger className="w-28" aria-label="Tahun">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -111,6 +92,10 @@ export function GoalsPage() {
               ))}
             </SelectContent>
           </Select>
+          <Button variant="outline" onClick={exportCsv} disabled={goals.length === 0}>
+            <Download className="size-4" />
+            Export CSV
+          </Button>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="size-4" />
             Goal baru
@@ -118,11 +103,13 @@ export function GoalsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard icon={<Target className="size-4" />} label="Total goal" value={String(goals.length)} />
-        <StatCard icon={<TrendingUp className="size-4" />} label="Rata-rata progres" value={`${avgProgress}%`} />
-        <StatCard icon={<CheckCircle2 className="size-4" />} label="Goal tercapai" value={String(completed)} />
-      </div>
+      {goals.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard icon={<Target className="size-4" />} label="Jumlah goal" value={String(goals.length)} />
+          <StatCard icon={<TrendingUp className="size-4" />} label="Rata-rata progres" value={`${avgProgress}%`} />
+          <StatCard icon={<CheckCircle2 className="size-4" />} label="Sudah tercapai" value={String(achieved)} />
+        </div>
+      )}
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2">
@@ -132,55 +119,36 @@ export function GoalsPage() {
         </div>
       ) : goals.length === 0 ? (
         <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <Target className="size-8 text-muted-foreground" />
-            <div>
-              <p className="font-medium">Belum ada goal untuk {year}</p>
-              <p className="text-sm text-muted-foreground">Mulai dengan menambahkan satu goal utama.</p>
+          <CardContent className="grid gap-5 py-10">
+            <div className="text-center">
+              <Target className="mx-auto mb-2 size-8 text-muted-foreground" />
+              <p className="font-medium">Belum ada goal untuk tahun {year}</p>
+              <p className="text-sm text-muted-foreground">Begini cara kerjanya:</p>
             </div>
-            <Button variant="outline" onClick={() => setCreateOpen(true)}>
+            <ol className="mx-auto grid max-w-md gap-2 text-sm text-muted-foreground">
+              {[
+                'Buat satu goal, misalnya "Belajar bahasa asing", lalu bagi tahunnya menjadi beberapa periode.',
+                "Isi task di tiap periode lengkap dengan tanggalnya.",
+                "Centang task yang selesai. Persentase progres naik otomatis.",
+              ].map((text, index) => (
+                <li key={text} className="flex gap-3">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                  {text}
+                </li>
+              ))}
+            </ol>
+            <Button className="mx-auto" onClick={() => setCreateOpen(true)}>
               <Plus className="size-4" />
-              Tambah goal
+              Buat goal pertama
             </Button>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {goals.map((goal) => (
-            <Card key={goal.id} className="transition-shadow hover:shadow-md">
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="truncate">
-                      <Link to={`/goals/${goal.id}`} className="hover:underline">
-                        {goal.title}
-                      </Link>
-                    </CardTitle>
-                    {goal.description && (
-                      <CardDescription className="line-clamp-2">{goal.description}</CardDescription>
-                    )}
-                  </div>
-                  <Badge variant={goal.progress >= 100 ? "default" : "secondary"}>
-                    {goal.progress >= 100 ? "Tercapai" : "Berjalan"}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Progres</span>
-                  <span className="font-semibold tabular-nums">{goal.progress}%</span>
-                </div>
-                <Progress value={goal.progress} />
-                <div className="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setPendingDelete(goal)}>
-                    Hapus
-                  </Button>
-                  <Button size="sm" nativeButton={false} render={<Link to={`/goals/${goal.id}`} />}>
-                    Buka
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <GoalCard key={goal.id} goal={goal} />
           ))}
         </div>
       )}
@@ -189,27 +157,49 @@ export function GoalsPage() {
         open={createOpen}
         year={Number(year)}
         onOpenChange={setCreateOpen}
-        onCreated={refresh}
+        onCreated={() => setRefreshKey((key) => key + 1)}
       />
-
-      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Hapus goal ini?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Goal "{pendingDelete?.title}" beserta semua task di dalamnya akan dihapus permanen.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Batal</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={handleDelete}>
-              Hapus
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
+}
+
+function GoalCard({ goal }: { goal: Goal }) {
+  const status = goalStatus(goal.progress, goal.summary.total);
+  return (
+    <Link to={`/goals/${goal.id}`} className="group block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <Card className="h-full transition-shadow group-hover:shadow-md">
+        <CardContent className="grid gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate font-semibold group-hover:underline">{goal.title}</h2>
+              {goal.description && <p className="line-clamp-1 text-sm text-muted-foreground">{goal.description}</p>}
+            </div>
+            <StatusBadge tone={status.tone} label={status.label} />
+          </div>
+          <div className="flex items-end justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              {goal.summary.total === 0
+                ? "Belum ada task"
+                : `${goal.summary.done} dari ${goal.summary.total} task selesai`}
+            </div>
+            <span className="text-xl font-semibold tabular-nums">{goal.progress}%</span>
+          </div>
+          <Progress value={goal.progress} />
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{periodsLabel(goal.periods)}</span>
+            <span className="flex items-center gap-1 text-primary">
+              Buka <ChevronRight className="size-3.5" />
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+export function StatusBadge({ tone, label }: { tone: "done" | "active" | "idle"; label: string }) {
+  const variant = tone === "done" ? "default" : tone === "active" ? "secondary" : "outline";
+  return <Badge variant={variant}>{label}</Badge>;
 }
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
@@ -236,16 +226,19 @@ interface CreateGoalDialogProps {
 function CreateGoalDialog({ open, year, onOpenChange, onCreated }: CreateGoalDialogProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [periods, setPeriods] = useState<PeriodInput[]>(() => presetPeriods("quarters", year));
   const [submitting, setSubmitting] = useState(false);
+  const invalid = periodError(periods, year);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setSubmitting(true);
     try {
-      await api.createGoal({ title: title.trim(), description: description.trim() || null, year });
-      toast.success("Goal ditambahkan");
+      await api.createGoal({ title: title.trim(), description: description.trim() || null, year, periods });
+      toast.success("Goal dibuat. Sekarang tambahkan task-nya.");
       setTitle("");
       setDescription("");
+      setPeriods(presetPeriods("quarters", year));
       onOpenChange(false);
       onCreated();
     } catch (err) {
@@ -257,32 +250,40 @@ function CreateGoalDialog({ open, year, onOpenChange, onCreated }: CreateGoalDia
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <form onSubmit={handleSubmit} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>Goal baru untuk {year}</DialogTitle>
-            <DialogDescription>Satu hal yang ingin dicapai, misalnya "Belajar bahasa asing".</DialogDescription>
+            <DialogDescription>Satu hal yang ingin dicapai tahun ini.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="goal-title">Judul</Label>
-            <Input id="goal-title" value={title} maxLength={150} onChange={(e) => setTitle(e.target.value)} required />
+            <Label htmlFor="goal-title">Nama goal</Label>
+            <Input
+              id="goal-title"
+              placeholder="mis. Belajar bahasa asing"
+              value={title}
+              maxLength={150}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="goal-desc">Deskripsi (opsional)</Label>
+            <Label htmlFor="goal-desc">Keterangan (opsional)</Label>
             <Textarea
               id="goal-desc"
-              rows={3}
+              rows={2}
               value={description}
               maxLength={2000}
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
+          <PeriodEditor year={year} value={periods} onChange={setPeriods} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Batal
             </Button>
-            <Button type="submit" disabled={submitting || !title.trim()}>
-              Simpan
+            <Button type="submit" disabled={submitting || !title.trim() || invalid !== null}>
+              Buat goal
             </Button>
           </DialogFooter>
         </form>

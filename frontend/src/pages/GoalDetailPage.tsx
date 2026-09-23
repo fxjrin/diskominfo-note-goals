@@ -1,8 +1,10 @@
-import { ArrowLeft, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { DatePicker } from "@/components/DatePicker";
+import { PeriodEditor } from "@/components/PeriodEditor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,9 +15,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -28,12 +29,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { monthName, type GoalDetail, type QuarterSummary, type Task } from "@/types";
+import { formatDate, formatRange, toIso } from "@/lib/dates";
+import { StatusBadge } from "@/pages/GoalsPage";
+import { goalStatus, periodError, type GoalDetail, type PeriodInput, type PeriodSummary, type Task } from "@/types";
 
 type Runner = (action: () => Promise<unknown>, success: string, fallback: string) => Promise<void>;
 
@@ -82,6 +82,15 @@ export function GoalDetailPage() {
     }
   }
 
+  async function exportCsv() {
+    try {
+      await api.downloadCsv(`/export/goals/${goalId}`, `goal-${goalId}.csv`);
+      toast.success("File CSV diunduh");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh CSV");
+    }
+  }
+
   if (error) {
     return (
       <Card>
@@ -100,9 +109,9 @@ export function GoalDetailPage() {
     return (
       <div className="grid gap-4">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 rounded-xl" />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
+        <Skeleton className="h-32 rounded-xl" />
+        <div className="grid gap-4 md:grid-cols-2">
+          {[0, 1].map((i) => (
             <Skeleton key={i} className="h-72 rounded-xl" />
           ))}
         </div>
@@ -110,11 +119,12 @@ export function GoalDetailPage() {
     );
   }
 
-  const achieved = goal.progress >= 100;
+  const status = goalStatus(goal.progress, goal.summary.total);
+  const columns = goal.periods.length >= 4 ? "xl:grid-cols-4" : goal.periods.length === 3 ? "xl:grid-cols-3" : "";
 
   return (
     <div className="grid gap-6">
-      <Button variant="ghost" size="sm" className="w-fit -ml-2" nativeButton={false} render={<Link to="/" />}>
+      <Button variant="ghost" size="sm" className="-ml-2 w-fit" nativeButton={false} render={<Link to="/" />}>
         <ArrowLeft className="size-4" />
         Semua goals
       </Button>
@@ -124,16 +134,22 @@ export function GoalDetailPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-xl">{goal.title}</CardTitle>
-                <Badge variant={achieved ? "default" : "secondary"}>{achieved ? "Tercapai" : "Berjalan"}</Badge>
-                <Badge variant="outline">{goal.year}</Badge>
+                <h1 className="text-xl font-semibold">{goal.title}</h1>
+                <StatusBadge tone={status.tone} label={status.label} />
               </div>
-              {goal.description && <CardDescription className="mt-1">{goal.description}</CardDescription>}
+              <p className="mt-1 text-sm text-muted-foreground">
+                Tahun {goal.year}
+                {goal.description ? `. ${goal.description}` : ""}
+              </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={exportCsv}>
+                <Download className="size-4" />
+                Export CSV
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                 <Pencil className="size-4" />
-                Edit
+                Ubah
               </Button>
               <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="size-4" />
@@ -142,48 +158,32 @@ export function GoalDetailPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-3">
-          <div className="flex items-end justify-between">
+        <CardContent className="grid gap-2">
+          <div className="flex items-end justify-between gap-3">
             <div>
-              <p className="text-sm text-muted-foreground">Progres keseluruhan</p>
-              <p className="text-xs text-muted-foreground">
-                {goal.summary.done} dari {goal.summary.total} task selesai. Persentase = task selesai / total task x 100.
+              <p className="font-medium">Progres tahun ini</p>
+              <p className="text-sm text-muted-foreground">
+                {goal.summary.total === 0
+                  ? "Belum ada task. Tambahkan task di periode di bawah."
+                  : `${goal.summary.done} dari ${goal.summary.total} task selesai.`}
               </p>
             </div>
-            <span className="text-3xl font-semibold tabular-nums text-primary">{goal.progress}%</span>
+            <span className="text-4xl font-semibold tabular-nums text-primary">{goal.progress}%</span>
           </div>
           <Progress value={goal.progress} className="[&_[data-slot=progress-track]]:h-3" />
-          <Separator className="my-1" />
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {goal.quarters.map((quarter) => (
-              <Tooltip key={quarter.quarter}>
-                <TooltipTrigger
-                  render={
-                    <div className="rounded-md border p-3 text-left">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>{quarter.label}</span>
-                        <span>bobot {quarter.weight}%</span>
-                      </div>
-                      <div className="mt-1 text-lg font-semibold tabular-nums">{quarter.progress}%</div>
-                      <Progress value={quarter.progress} className="mt-1" />
-                    </div>
-                  }
-                />
-                <TooltipContent>
-                  {quarter.done}/{quarter.total} task selesai, kontribusi {quarter.contribution}% ke tahun
-                </TooltipContent>
-              </Tooltip>
-            ))}
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Setiap periode menyumbang sesuai bobotnya. Centang task untuk menaikkan progres, hilangkan centang untuk
+            menurunkannya.
+          </p>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {goal.quarters.map((quarter) => (
-          <QuarterCard
-            key={quarter.quarter}
-            quarter={quarter}
-            tasks={goal.tasks.filter((task) => task.quarter === quarter.quarter)}
+      <div className={`grid gap-4 md:grid-cols-2 ${columns}`}>
+        {goal.periods.map((period) => (
+          <PeriodCard
+            key={period.id}
+            period={period}
+            tasks={goal.tasks.filter((task) => task.periodId === period.id)}
             goalId={goalId}
             run={run}
           />
@@ -195,15 +195,17 @@ export function GoalDetailPage() {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Hapus goal ini?</AlertDialogTitle>
+            <AlertDialogTitle>Hapus goal "{goal.title}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              Goal "{goal.title}" beserta {goal.summary.total} task di dalamnya akan dihapus permanen.
+              {goal.summary.total > 0
+                ? `Semua ${goal.summary.total} task di dalamnya ikut terhapus dan tidak bisa dikembalikan.`
+                : "Goal ini belum punya task. Penghapusan tidak bisa dikembalikan."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={handleDeleteGoal}>
-              Hapus
+              Ya, hapus
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -212,100 +214,89 @@ export function GoalDetailPage() {
   );
 }
 
-interface QuarterCardProps {
-  quarter: QuarterSummary;
+interface PeriodCardProps {
+  period: PeriodSummary;
   tasks: Task[];
   goalId: number;
   run: Runner;
 }
 
-function QuarterCard({ quarter, tasks, goalId, run }: QuarterCardProps) {
-  const [month, setMonth] = useState(String(quarter.months[0]));
+// Today when it falls inside the period, otherwise the period start, so the picker opens somewhere sensible
+function defaultDue(period: PeriodSummary): string {
+  const today = toIso(new Date());
+  return today >= period.startDate && today <= period.endDate ? today : period.startDate;
+}
+
+function PeriodCard({ period, tasks, goalId, run }: PeriodCardProps) {
   const [title, setTitle] = useState("");
-  const perTask = quarter.total > 0 ? Math.round((100 / quarter.total) * 100) / 100 : 0;
-  const monthItems = quarter.months.map((m) => ({ value: String(m), label: monthName(m) }));
+  const [dueDate, setDueDate] = useState(() => defaultDue(period));
+  const status = goalStatus(period.progress, period.total);
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim()) return;
+    const value = title.trim();
+    if (!value) return;
+    setTitle("");
     await run(
-      () => api.createTask(goalId, { title: title.trim(), month: Number(month) }),
+      () => api.createTask(goalId, { title: value, periodId: period.id, dueDate }),
       "Task ditambahkan",
       "Gagal menambah task",
     );
-    setTitle("");
   }
 
   return (
     <Card className="flex flex-col">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>{quarter.label}</CardTitle>
-          <span className="text-lg font-semibold tabular-nums text-primary">{quarter.progress}%</span>
+      <CardHeader className="gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="truncate text-lg font-semibold">{period.name}</h2>
+            <StatusBadge tone={status.tone} label={status.label} />
+          </div>
+          <span className="text-lg font-semibold tabular-nums text-primary">{period.progress}%</span>
         </div>
-        <CardDescription>
-          {monthName(quarter.months[0])} - {monthName(quarter.months[2])}
-        </CardDescription>
-        <Progress value={quarter.progress} className="mt-2" />
+        <p className="text-sm text-muted-foreground">
+          {formatRange(period.startDate, period.endDate)}. Bobot {period.weight}% dari tahun.
+        </p>
+        <Progress value={period.progress} className="mt-1" />
         <p className="text-xs text-muted-foreground">
-          {quarter.done}/{quarter.total} task selesai
-          {quarter.total > 0 ? `, tiap task ${perTask}% dari kuartal` : ""}
+          {period.total === 0 ? "Belum ada task" : `${period.done} dari ${period.total} task selesai`}
         </p>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-3">
-        {quarter.months.map((m) => {
-          const monthTasks = tasks.filter((task) => task.month === m);
-          return (
-            <div key={m} className="grid gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {monthName(m)}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {monthTasks.filter((task) => task.status === "done").length}/{monthTasks.length}
-                </span>
-              </div>
-              {monthTasks.length === 0 ? (
-                <p className="rounded-md border border-dashed px-2 py-1.5 text-xs text-muted-foreground">
-                  Belum ada task
-                </p>
-              ) : (
-                <ul className="grid gap-1">
-                  {monthTasks.map((task) => (
-                    <TaskRow key={task.id} task={task} run={run} />
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })}
+        {tasks.length === 0 ? (
+          <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+            Belum ada task di periode ini.
+          </p>
+        ) : (
+          <ul className="grid gap-0.5">
+            {tasks.map((task) => (
+              <TaskRow key={task.id} task={task} run={run} />
+            ))}
+          </ul>
+        )}
         <form onSubmit={handleAdd} className="mt-auto grid gap-2 border-t pt-3">
+          <Input
+            className="h-8"
+            placeholder="Tulis task baru"
+            value={title}
+            maxLength={150}
+            onChange={(e) => setTitle(e.target.value)}
+            aria-label={`Task baru ${period.name}`}
+          />
           <div className="flex gap-2">
-            <Select value={month} onValueChange={(v) => v && setMonth(v)} items={monthItems}>
-              <SelectTrigger size="sm" className="w-32 shrink-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {monthItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              className="h-8"
-              placeholder="Task baru"
-              value={title}
-              maxLength={150}
-              onChange={(e) => setTitle(e.target.value)}
-              required
+            <DatePicker
+              value={dueDate}
+              onChange={setDueDate}
+              min={period.startDate}
+              max={period.endDate}
+              size="sm"
+              className="min-w-0 flex-1"
             />
+            <Button type="submit" size="sm" variant="secondary" disabled={!title.trim()}>
+              <Plus className="size-4" />
+              Tambah
+            </Button>
           </div>
-          <Button type="submit" size="sm" variant="secondary" disabled={!title.trim()}>
-            <Plus className="size-4" />
-            Tambah task
-          </Button>
         </form>
       </CardContent>
     </Card>
@@ -315,7 +306,7 @@ function QuarterCard({ quarter, tasks, goalId, run }: QuarterCardProps) {
 function TaskRow({ task, run }: { task: Task; run: Runner }) {
   const done = task.status === "done";
   return (
-    <li className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60">
+    <li className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60">
       <Checkbox
         id={`task-${task.id}`}
         checked={done}
@@ -329,14 +320,15 @@ function TaskRow({ task, run }: { task: Task; run: Runner }) {
       />
       <Label
         htmlFor={`task-${task.id}`}
-        className={`flex-1 cursor-pointer text-sm font-normal ${done ? "text-muted-foreground line-through" : ""}`}
+        className={`min-w-0 flex-1 cursor-pointer text-sm font-normal ${done ? "text-muted-foreground line-through" : ""}`}
       >
-        {task.title}
+        <span className="truncate">{task.title}</span>
       </Label>
+      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatDate(task.dueDate, "d MMM")}</span>
       <Button
         variant="ghost"
         size="icon-xs"
-        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        className="text-muted-foreground hover:text-destructive"
         aria-label={`Hapus ${task.title}`}
         onClick={() => run(() => api.deleteTask(task.id), "Task dihapus", "Gagal menghapus task")}
       >
@@ -356,12 +348,16 @@ interface EditGoalDialogProps {
 function EditGoalDialog({ goal, open, onOpenChange, run }: EditGoalDialogProps) {
   const [title, setTitle] = useState(goal.title);
   const [description, setDescription] = useState(goal.description ?? "");
+  const [periods, setPeriods] = useState<PeriodInput[]>(() =>
+    goal.periods.map(({ id, name, startDate, endDate, weight }) => ({ id, name, startDate, endDate, weight })),
+  );
+  const invalid = periodError(periods, goal.year);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     await run(
-      () => api.updateGoal(goal.id, { title: title.trim(), description: description.trim() || null }),
-      "Goal diperbarui",
+      () => api.updateGoal(goal.id, { title: title.trim(), description: description.trim() || null, periods }),
+      "Perubahan disimpan",
       "Gagal menyimpan goal",
     );
     onOpenChange(false);
@@ -369,31 +365,34 @@ function EditGoalDialog({ goal, open, onOpenChange, run }: EditGoalDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <form onSubmit={handleSubmit} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>Edit goal</DialogTitle>
-            <DialogDescription>Ubah judul atau deskripsi goal.</DialogDescription>
+            <DialogTitle>Ubah goal</DialogTitle>
+            <DialogDescription>
+              Periode yang masih punya task tidak bisa dihapus, dan tanggalnya tidak bisa dipersempit melewati task.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="edit-title">Judul</Label>
+            <Label htmlFor="edit-title">Nama goal</Label>
             <Input id="edit-title" value={title} maxLength={150} onChange={(e) => setTitle(e.target.value)} required />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="edit-desc">Deskripsi</Label>
+            <Label htmlFor="edit-desc">Keterangan</Label>
             <Textarea
               id="edit-desc"
-              rows={3}
+              rows={2}
               value={description}
               maxLength={2000}
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
+          <PeriodEditor year={goal.year} value={periods} onChange={setPeriods} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Batal
             </Button>
-            <Button type="submit" disabled={!title.trim()}>
+            <Button type="submit" disabled={!title.trim() || invalid !== null}>
               Simpan
             </Button>
           </DialogFooter>
